@@ -129,41 +129,52 @@ def main():
     # Save Parsed Data 
 
     # Move Original and Parsed Data into Archive
-    for file in data_files: 
-        shutil.move(f'{user_desktop_path()}/{file}', f'{user_data_dir(appname)}/{file}')
-    console.print(f'[ INFO ] Moved data files from "{user_desktop_path()}" to "{user_data_dir(appname)}"')
+    if 'clean' in sys.argv: 
+        for file in data_files: 
+            shutil.move(f'{user_desktop_path()}/{file}', f'{user_data_dir(appname)}/{file}')
+        console.print(f'[ INFO ] Moved data files from "{user_desktop_path()}" to "{user_data_dir(appname)}"')
+
+def set_transaction_style(transaction): 
+    if transaction.amount < 0: 
+        return 'blue'
+    elif transaction.amount == 0: 
+        return 'black'
+    elif transaction.category == 'food': 
+        return 'bright_black'
+    return 'yellow'
 
 def print_transaction_tables(console, transactions): 
-    discover_trans_table = Table(title='Discover Transactions', expand=True)
-    discover_trans_table.add_column('Transaction Date', 'white')
-    discover_trans_table.add_column('Amount', 'white')
-    discover_trans_table.add_column('Description', 'white')
-    discover_trans_table.add_column('Category', 'white')
+    discover_trans_table = Table(title='Discover Transactions', expand=True, border_style='bright_black', title_style='bold')
+    discover_trans_table.add_column('Transaction Date', header_style='white', style='white')
+    discover_trans_table.add_column('Amount',           header_style='white', style='white')
+    discover_trans_table.add_column('Description',      header_style='white', style='white')
+    discover_trans_table.add_column('Category',         header_style='white', style='white')
     for transaction in transactions['Discover']: 
-        discover_trans_table.add_row(*transaction.get_renderable_tuple())
+        discover_trans_table.add_row(*transaction.get_renderable_tuple(), style=set_transaction_style(transaction))
     console.print(discover_trans_table)
 
-    chase_trans_table = Table(title='Chase Transactions', expand=True)
-    chase_trans_table.add_column('Transaction Date', 'white')
-    chase_trans_table.add_column('Amount', 'white')
-    chase_trans_table.add_column('Description', 'white')
-    chase_trans_table.add_column('Category', 'white')
-    chase_trans_table.add_column('Type', 'white')
-    chase_trans_table.add_column('Memo', 'white')
+    chase_trans_table = Table(title='Chase Transactions', expand=True, border_style='bright_black', title_style='bold')
+    chase_trans_table.add_column('Transaction Date', header_style='white', style='white')
+    chase_trans_table.add_column('Amount',           header_style='white', style='white')
+    chase_trans_table.add_column('Description',      header_style='white', style='white')
+    chase_trans_table.add_column('Category',         header_style='white', style='white')
+    chase_trans_table.add_column('Type',             header_style='white', style='white')
+    chase_trans_table.add_column('Memo',             header_style='white', style='white')
     for transaction in transactions['Chase']: 
-        chase_trans_table.add_row(*transaction.get_renderable_tuple())
+        chase_trans_table.add_row(*transaction.get_renderable_tuple(), style=set_transaction_style(transaction))
     console.print(chase_trans_table)
 
-    apple_trans_table = Table(title='Apple Transactions', expand=True)
-    apple_trans_table.add_column('Transaction Date', 'white')
-    apple_trans_table.add_column('Amount', 'white')
-    apple_trans_table.add_column('Description', 'white')
-    apple_trans_table.add_column('Merchant', 'white')
-    apple_trans_table.add_column('Category', 'white')
-    apple_trans_table.add_column('Type', 'white')
-    apple_trans_table.add_column('Purchased By', 'white')
+    apple_trans_table = Table(title='Apple Transactions', expand=True, border_style='bright_black', title_style='bold')
+    apple_trans_table.add_column('Transaction Date', header_style='white', style='white')
+    apple_trans_table.add_column('Amount',           header_style='white', style='white')
+    apple_trans_table.add_column('Description',      header_style='white', style='white')
+    apple_trans_table.add_column('Merchant',         header_style='white', style='white')
+    apple_trans_table.add_column('Category',         header_style='white', style='white')
+    apple_trans_table.add_column('Type',             header_style='white', style='white')
+    apple_trans_table.add_column('Purchased By',     header_style='white', style='white')
     for transaction in transactions['Apple']: 
-        apple_trans_table.add_row(*transaction.get_renderable_tuple())
+        style = 'green' if transaction.amount < 0 else 'white'
+        apple_trans_table.add_row(*transaction.get_renderable_tuple(), style=set_transaction_style(transaction))
     console.print(apple_trans_table)
 
 def print_totals_tables(console, transactions): 
@@ -176,19 +187,19 @@ def print_totals_tables(console, transactions):
             total += transaction.amount
 
     # print formatted tables
-    account_table = Table(title='Account Totals', header_style='white') 
-    account_table.add_column('Account', justify='left')
-    account_table.add_column('Amount (USD)', justify='right')
+    account_table = Table(title='Account Totals', border_style='bright_black', title_style='bold') 
+    account_table.add_column('Account',      header_style='white', style='white', justify='left')
+    account_table.add_column('Amount (USD)', header_style='white', style='white', justify='right')
     account_table.add_row('Discover', f'{sum([transaction.amount for transaction in transactions['Discover']]):.{0}f}' )
-    account_table.add_row('Chase', f'{sum([transaction.amount for transaction in transactions['Chase']]):.{0}f}' )
-    account_table.add_row('Apple', f'{sum([transaction.amount for transaction in transactions['Apple']]):.{0}f}' )
+    account_table.add_row('Chase',    f'{sum([transaction.amount for transaction in transactions['Chase']]):.{0}f}' )
+    account_table.add_row('Apple',    f'{sum([transaction.amount for transaction in transactions['Apple']]):.{0}f}' )
     console.print(account_table)
 
-    general_table = Table(title='Monthly Totals', header_style='white') 
-    general_table.add_column('Category', justify='left')
-    general_table.add_column('Amount (USD)', justify='right')
-    general_table.add_row('Guilt Free', f'{total-groceries:.{0}f}' )
-    general_table.add_row('Groceries', f'{groceries:.{0}f}' )
+    general_table = Table(title='Monthly Totals', border_style='bright_black', title_style='bold') 
+    general_table.add_column('Category',     header_style='white', justify='left',  style='white')
+    general_table.add_column('Amount (USD)', header_style='white', justify='right', style='green')
+    general_table.add_row('Guilt Free',  f'{total-groceries:.{0}f}' )
+    general_table.add_row('Groceries',   f'{groceries:.{0}f}' )
     general_table.add_row('Grand Total', f'{total:.{0}f}' )
     console.print(general_table)
 
