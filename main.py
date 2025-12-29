@@ -1,4 +1,6 @@
 from dataclasses import dataclass
+from pathlib import Path
+import csv
 import os
 import re
 import sys 
@@ -8,6 +10,15 @@ import shutil
 from platformdirs import user_data_dir, user_desktop_path
 from rich.console import Console 
 from rich.table import Table 
+
+FOOD_LABEL = '-- food'
+GF_LABEL = '-- guilt free'
+
+def get_amount(t): 
+    for date, amount, description in ZERO_AMOUNTS: 
+        if t.trans_date == date and t.amount == amount and t.description == description: 
+            return 0 
+    return t.amount
 
 @dataclass
 class DTransaction: 
@@ -20,14 +31,18 @@ class DTransaction:
         return (self.trans_date, str(self.amount), self.description, self.category)
 
 def make_discover_transaction(line): 
-    parsed = line.split(',')
-    t =  DTransaction(parsed[0], float(parsed[3]), parsed[2], parsed[4])
+    t =  DTransaction(line[0], float(line[3]), line[2], line[4])
+    t.amount = get_amount(t)
     if not t.category.startswith('Payment'):
         if (t.description.startswith('TARGET')
             or t.category.startswith('Supermarket')
             or t.description.startswith('TST*HABANERO')
             or t.description.startswith('POTBELLY')): 
-            t.category = 'food'
+            t.category = FOOD_LABEL
+
+    for date, amount, description in TO_GUILT_FREE: 
+        if t.trans_date == date and t.amount == amount and t.description == description: 
+            t.category = GF_LABEL
 
     if t.description.startswith('DIRECTPAY'): 
         t.amount = 0 
@@ -46,8 +61,8 @@ class CTransaction:
         return (self.trans_date, str(self.amount), self.description, self.category, self.type, self.memo)
 
 def make_chase_transaction(line): 
-    parsed = line.split(',')
-    t = CTransaction(parsed[0], -1 * float(parsed[5]), parsed[2], parsed[3], parsed[4], parsed[6])
+    t = CTransaction(line[0], -1 * float(line[5]), line[2], line[3], line[4], line[6])
+    t.amount = get_amount(t)
     if t.description.startswith('AUTOMATIC'): 
         t.amount = 0 
     return t
@@ -66,9 +81,9 @@ class ATransaction:
         return (self.trans_date, str(self.amount), self.description, self.merchant, self.category, self.type, self.purchased_by)
 
 def make_apple_transaction(line): 
-    parsed = line.split(',')
-    t = ATransaction(parsed[0], float(parsed[6]), parsed[2], parsed[3], parsed[4], parsed[5], parsed[7])
-    if t.category == 'Payment': 
+    t = ATransaction(line[0], float(line[6]), line[2], line[3], line[4], line[5], line[7])
+    t.amount = get_amount(t)
+    if t.category == 'Payment' or t.merchant == 'Credit Adjustment':
         t.amount = 0 
     return t
 
@@ -78,15 +93,55 @@ FILES = [
     'Apple'
 ]
 
+# Whitelist arrays for changing how some files are parsed
+TO_GUILT_FREE = []
+ZERO_AMOUNTS = []
+
+def usage(console: Console): 
+    console.print('[bold]DOWNLOAD LINKS: [/bold]')
+    console.print('Use the following links to download activity CSV files and place them in ~/Desktop:')
+    console.print('Discover : https://card.discover.com/cardmembersvcs/statements/app/activity?view=R#/ytd')
+    console.print('Chase    : https://secure.chase.com/web/auth/dashboard#/dashboard/transactions/1030825251/CARD/BAC')
+    console.print('Apple    : Airdop from Wallet app')
+    console.print('')
+
+    console.print('[bold]USAGE: [/bold]')
+    console.print('$ python main.py \\[month] \\[options]')
+    console.print('[bold]\nOPTIONS: [/bold]')
+    console.print('-c | --clean  : Move data file to archive directory')
+    console.print('-h | --help   : Print usage and exit')
+    
 def main(): 
     console = Console()
+    if '--help' in sys.argv or '-h' in sys.argv: 
+        usage(console) 
+        sys.exit(1)
+
+    # load whitelist data from separate file 
+    whitelist_fn = Path(__file__).resolve().parent.joinpath('whitelists/to_guilt_free.csv')
+    whitelist_file = whitelist_fn.open()
+    for line in whitelist_file.readlines(): 
+        l = [ value.strip() for value in line.split(chr(9474)) ]
+        TO_GUILT_FREE.append((l[0], float(l[1]), l[2]))
+
+    # load whitelist data from separate file 
+    whitelist_fn = Path(__file__).resolve().parent.joinpath('whitelists/zero_amounts.csv')
+    whitelist_file = whitelist_fn.open()
+    for line in whitelist_file.readlines(): 
+        l = [ value.strip() for value in line.split(chr(9474)) ]
+        ZERO_AMOUNTS.append((l[0], float(l[1]), l[2]))
 
     # set up month to analyze
     curr_month = str(datetime.datetime.now().month)
-    if len(sys.argv) > 1 and 1 <= int(sys.argv[1]) <= 12: 
-        curr_month = sys.argv[1]
-    else:
-        console.print(f'[ INFO ] Did not provide valid month in CLI... defaulting to month: {curr_month}')
+    try: 
+        if len(sys.argv) > 1 and not sys.argv[1].startswith('--') and 1 <= int(sys.argv[1]) <= 12: 
+            curr_month = sys.argv[1]
+        else:
+            console.print(f'[ INFO ] Did not provide valid month in CLI... defaulting to month: {curr_month}')
+    except: 
+        print(f'[ ERROR ] Failed to parse arugments: {sys.argv}')
+        usage(console)
+        sys.exit(1)
 
     # setup user data path with app name
     appname = 'credit-transaction-parser'
@@ -96,26 +151,28 @@ def main():
         console.print(f'[ INFO ] Created data path: {data_path}')
 
     # Load Transactions
-    transactions = { }
+    transactions = { 
+        'Discover': [], 
+        'Chase': [], 
+        'Apple': []
+    }
     data_files = [
         file for file in os.listdir(user_desktop_path()) if file.lower().endswith('.csv')
     ]
-    for file in data_files:
-        with open(f'{user_desktop_path()}/{file}', 'r') as f: 
-            console.print(f'[ DEBUG ] Opening "{user_desktop_path()}/{file}"')
-            contents = f.read()
-            scrubbed, _ = re.subn(r'"', '', contents)
-            lines = scrubbed.split('\n')[1:-1]
+    for filename in data_files:
+        file = Path(user_desktop_path(), filename).open()
+        next(file) # skip the first line of headers
+        reader = csv.reader(file)
 
-        if file.startswith('Discover'): 
-            transactions['Discover'] = [ make_discover_transaction(line) for line in lines ]
+        if filename.startswith('Discover'): 
+            transactions['Discover'] = [ make_discover_transaction(line) for line in reader ]
             
-        elif file.startswith('Chase'):
-            transactions['Chase'] = [ make_chase_transaction(line) for line in lines ]
+        elif filename.startswith('Chase'):
+            transactions['Chase'] = [ make_chase_transaction(line) for line in reader ]
             transactions['Chase'].reverse()
 
-        elif file.startswith('Apple'): 
-            transactions['Apple'] = [ make_apple_transaction(line) for line in lines ]
+        elif filename.startswith('Apple'): 
+            transactions['Apple'] = [ make_apple_transaction(line) for line in reader ]
     console.print()
 
     # filter transactions for month
@@ -129,7 +186,7 @@ def main():
     # Save Parsed Data 
 
     # Move Original and Parsed Data into Archive
-    if 'clean' in sys.argv: 
+    if '--clean' in sys.argv: 
         for file in data_files: 
             shutil.move(f'{user_desktop_path()}/{file}', f'{user_data_dir(appname)}/{file}')
         console.print(f'[ INFO ] Moved data files from "{user_desktop_path()}" to "{user_data_dir(appname)}"')
@@ -139,7 +196,7 @@ def set_transaction_style(transaction):
         return 'blue'
     elif transaction.amount == 0: 
         return 'black'
-    elif transaction.category == 'food': 
+    elif transaction.category == FOOD_LABEL: 
         return 'bright_black'
     return 'yellow'
 
@@ -182,7 +239,7 @@ def print_totals_tables(console, transactions):
     groceries = 0 
     for _, v in transactions.items():
         for transaction in v:
-            if transaction.category == 'food': 
+            if transaction.category == FOOD_LABEL: 
                 groceries += transaction.amount 
             total += transaction.amount
 
