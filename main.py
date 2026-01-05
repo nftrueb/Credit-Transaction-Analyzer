@@ -132,16 +132,24 @@ def main():
         ZERO_AMOUNTS.append((l[0], float(l[1]), l[2]))
 
     # set up month to analyze
-    curr_month = str(datetime.datetime.now().month)
+    now = datetime.datetime.now()
+    curr_month = f'{now.month:02d}'
     try: 
         if len(sys.argv) > 1 and not sys.argv[1].startswith('--') and 1 <= int(sys.argv[1]) <= 12: 
             curr_month = sys.argv[1]
         else:
             console.print(f'[ INFO ] Did not provide valid month in CLI... defaulting to month: {curr_month}')
+   
+        if len(curr_month) != 2 or curr_month[0] not in {'0', '1', '2'}: 
+            console.print(f'[ ERROR ] Provided invalid month: {curr_month}')
+            raise Exception()
+
     except: 
         print(f'[ ERROR ] Failed to parse arugments: {sys.argv}')
         usage(console)
         sys.exit(1)
+
+    curr_year = str(now.year-1) if int(curr_month) > now.month else str(now.year)
 
     # setup user data path with app name
     appname = 'credit-transaction-parser'
@@ -159,13 +167,19 @@ def main():
     data_files = [
         file for file in os.listdir(user_desktop_path()) if file.lower().endswith('.csv')
     ]
+    print(data_files)
     for filename in data_files:
         file = Path(user_desktop_path(), filename).open()
         next(file) # skip the first line of headers
         reader = csv.reader(file)
 
         if filename.startswith('Discover'): 
-            transactions['Discover'] = [ make_discover_transaction(line) for line in reader ]
+            parsed = [ make_discover_transaction(line) for line in reader ]
+            if filename.find('RecentActivity') >= 0: 
+                parsed.reverse()
+
+            for transaction in parsed: 
+                transactions['Discover'].append(transaction)
             
         elif filename.startswith('Chase'):
             transactions['Chase'] = [ make_chase_transaction(line) for line in reader ]
@@ -177,7 +191,10 @@ def main():
 
     # filter transactions for month
     for k, v in transactions.items(): 
-        transactions[k] = list(filter(lambda x: x.trans_date.startswith(curr_month), v))
+        transactions[k] = list(filter(
+            lambda x: x.trans_date.startswith(curr_month) and x.trans_date.endswith(curr_year), 
+            v
+        ))
         
     print_transaction_tables(console, transactions)
 
